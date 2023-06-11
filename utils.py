@@ -14,27 +14,36 @@ def get_hh_data(company_ids):
         company_info = {
             'id': company_data['id'],
             'name': company_data['name'],
-            'description': company_data['description'],
             'area': company_data['area']['name']
         }
 
-        vacancies_url = f'https://api.hh.ru/vacancies?employer_id={company_id}'
-        vacancies_response = requests.get(vacancies_url)
+        vacancies_url = f'https://api.hh.ru/vacancies'
+        params = {
+            'employer_id': company_id,
+            'per_page': 50,
+            'page': 0,
+            'area': 113
+        }
+
+        vacancies_response = requests.get(vacancies_url, params=params)
         vacancies_data = vacancies_response.json()
         vacancies = []
 
-        for vacancy in vacancies_data['items']:
-            vacancy_info = {
-                'name': vacancy['name'],
-                'url': vacancy['alternate_url'],
-                'salary_from': vacancy['salary']['from'] if vacancy['salary'] else None,
-                'salary_to': vacancy['salary']['to'] if vacancy['salary'] else None,
-                'salary_currency': vacancy['salary']['currency'] if vacancy['salary'] else None,
-                'responsibility': vacancy['snippet']['responsibility'] if vacancy['snippet'] else None,
-                'published_at': vacancy['published_at'],
-                'company_id': vacancy['employer']['id'] if vacancy['employer'] else None
-            }
-            vacancies.append(vacancy_info)
+        for page in range(0, vacancies_data['pages']):
+            params['page'] = page
+            vacancies_response = requests.get(vacancies_url, params=params)
+            vacancies_data = vacancies_response.json()
+
+            for vacancy in vacancies_data['items']:
+                vacancy_info = {
+                    'name': vacancy['name'],
+                    'url': vacancy['alternate_url'],
+                    'salary_from': vacancy['salary']['from'] if vacancy['salary'] else None,
+                    'salary_to': vacancy['salary']['to'] if vacancy['salary'] else None,
+                    'salary_currency': vacancy['salary']['currency'] if vacancy['salary'] else None,
+                    'company_id': vacancy['employer']['id'] if vacancy['employer'] else None
+                }
+                vacancies.append(vacancy_info)
 
         hh_data.append({'company': company_info, 'vacancies': vacancies})
 
@@ -48,7 +57,7 @@ def create_database(database_name, params):
     conn.autocommit = True
     cur = conn.cursor()
 
-    cur.execute(f"DROP DATABASE {database_name}")
+    cur.execute(f"DROP DATABASE IF EXISTS {database_name}")
     cur.execute(f"CREATE DATABASE {database_name}")
 
     conn.close()
@@ -60,8 +69,7 @@ def create_database(database_name, params):
             CREATE TABLE companies (
                 company_id INT PRIMARY KEY,
                 name VARCHAR(30) NOT NULL,
-                description TEXT,
-                area VARCHAR(20)
+                area VARCHAR(50)
             )
         """)
 
@@ -73,8 +81,6 @@ def create_database(database_name, params):
                 salary_from INTEGER,
                 salary_to INTEGER,
                 salary_currency VARCHAR(3),
-                responsibility TEXT,
-                published_at TIMESTAMP,
                 company_id INT REFERENCES companies(company_id)
             )
         """)
@@ -91,23 +97,22 @@ def save_data_to_database(data, database_name, params):
         for company_data in data:
             company = company_data['company']
             cur.execute("""
-                INSERT INTO companies (company_id, name, description, area)
-                VALUES (%s, %s, %s, %s)
-                """,
-                        (company['id'], company['name'], company['description'], company['area']))
+                INSERT INTO companies (company_id, name, area)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (company_id) DO NOTHING
+            """, (company['id'], company['name'], company['area']))
 
             cur.execute("""
-                    SELECT company_id FROM companies WHERE name = %s
-                """, (company['name'],))
+                SELECT company_id FROM companies WHERE company_id = %s
+            """, (company['id'],))
             company_id = cur.fetchone()[0]
 
             for vacancy in company_data['vacancies']:
                 cur.execute("""
-                    INSERT INTO vacancies (name, url, salary_from, salary_to, salary_currency, responsibility, 
-                    published_at, company_id)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                    INSERT INTO vacancies (name, url, salary_from, salary_to, salary_currency, company_id)
+                    VALUES (%s, %s, %s, %s, %s, %s)
                 """, (vacancy['name'], vacancy['url'], vacancy['salary_from'], vacancy['salary_to'],
-                      vacancy['salary_currency'], vacancy['responsibility'], vacancy['published_at'], company_id))
+                      vacancy['salary_currency'], company_id))
 
         conn.commit()
         conn.close()

@@ -10,6 +10,7 @@ packages = [{include = "cw_5_sql"}]
 python = "^3.11"
 requests = "^2.31.0"
 psycopg2 = "^2.9.6"
+prettytable = "^3.7.0"
 
 
 [build-system]
